@@ -13,6 +13,7 @@ This demonstrates a vulnerability in `libfuse` `fusermount3` that exists on CI/C
 - Path resolution changes that would target `/proc`
 - Actual `umount2("/proc", MNT_DETACH)` in a private mount namespace only
 - Cross-process "victim job" failures after `/proc` is unmounted in that namespace
+- A real GitHub-hosted attacker/victim job pair showing whether cross-job impact occurs on `ubuntu-latest`
 - Fallback real unmount of a throwaway tmpfs mountpoint when namespace `/proc` proof is unavailable
 - Synthetic same-UID token exposure using a fake `FAKE_GITHUB_TOKEN`
 
@@ -64,7 +65,7 @@ The vulnerability is a symlink race in the error cleanup path of `fusermount3`. 
 2. Using `UMOUNT_NOFOLLOW`
 3. Pinning the mountpoint
 
-`instrumented_fusermount3.c` demonstrates the race mechanics but does not execute the actual exploit. `safe_namespace_impact_demo.sh` separately proves that `umount2("/proc", MNT_DETACH)` breaks concurrent processes, but only after `safe_umount_proc_namespace.c` verifies it is running in a private mount namespace. If that proof cannot run, `safe_tmpfs_unmount_demo.sh` performs a real unmount of a throwaway tmpfs mountpoint. `synthetic_token_exposure_demo.sh` models a self-hosted runner isolation failure with a fake token; it does not read real secrets.
+`instrumented_fusermount3.c` demonstrates the race mechanics but does not execute the actual exploit. `safe_namespace_impact_demo.sh` separately proves that `umount2("/proc", MNT_DETACH)` breaks concurrent processes, but only after `safe_umount_proc_namespace.c` verifies it is running in a private mount namespace. If that proof cannot run, `safe_tmpfs_unmount_demo.sh` performs a real unmount of a throwaway tmpfs mountpoint. The root GitHub workflow also runs separate attacker and victim jobs on `ubuntu-latest` and compares their reports; this is the real GitHub-hosted evidence for whether cross-job impact occurs. `synthetic_token_exposure_demo.sh` models a self-hosted runner isolation failure with a fake token; it does not read real secrets.
 
 ## References
 

@@ -57,3 +57,115 @@ jobs:
           echo "2. Real unmount action: guarded private namespace /proc proof or tmpfs fallback"
           echo "3. Cross-process impact: victim loops fail inside private namespace"
           echo "4. Token exposure model: fake token only, no real secrets read"
+
+  github-hosted-attacker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record attacker runner identity
+        run: |
+          {
+            echo "role=attacker"
+            echo "hostname=$(hostname)"
+            echo "runner_name=${RUNNER_NAME:-unknown}"
+            echo "runner_os=${RUNNER_OS:-unknown}"
+            echo "mount_ns=$(readlink /proc/self/ns/mnt)"
+            echo "pid_ns=$(readlink /proc/self/ns/pid)"
+          } | tee attacker-report.txt
+
+      - name: Run contained attacker impact proof
+        run: |
+          cd poc_cicd_critical
+          bash safe_namespace_impact_demo.sh | tee ../attacker-impact.log
+
+      - name: Append attacker result
+        run: |
+          {
+            echo "attacker_result=completed"
+            echo "attacker_impact_log_tail<<EOF"
+            tail -40 attacker-impact.log
+            echo "EOF"
+          } >> attacker-report.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: github-hosted-attacker-report
+          path: |
+            attacker-report.txt
+            attacker-impact.log
+
+  github-hosted-victim:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record victim runner identity and monitor /proc
+        run: |
+          {
+            echo "role=victim"
+            echo "hostname=$(hostname)"
+            echo "runner_name=${RUNNER_NAME:-unknown}"
+            echo "runner_os=${RUNNER_OS:-unknown}"
+            echo "mount_ns=$(readlink /proc/self/ns/mnt)"
+            echo "pid_ns=$(readlink /proc/self/ns/pid)"
+          } | tee victim-report.txt
+
+          echo "victim_monitor_start=$(date -u +%FT%TZ)" >> victim-report.txt
+          failed=0
+          for i in $(seq 1 20); do
+            if [[ -r /proc/self/status ]]; then
+              echo "victim_check_$i=proc_ok" | tee -a victim-report.txt
+            else
+              echo "victim_check_$i=proc_failed" | tee -a victim-report.txt
+              failed=1
+              break
+            fi
+            sleep 1
+          done
+          echo "victim_monitor_end=$(date -u +%FT%TZ)" >> victim-report.txt
+          echo "victim_failed=$failed" >> victim-report.txt
+          exit "$failed"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: github-hosted-victim-report
+          path: victim-report.txt
+
+  github-hosted-cross-job-analysis:
+    runs-on: ubuntu-latest
+    needs:
+      - github-hosted-attacker
+      - github-hosted-victim
+    if: always()
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: reports
+
+      - name: Analyze GitHub-hosted cross-job evidence
+        run: |
+          echo "=== Attacker report ==="
+          cat reports/github-hosted-attacker-report/attacker-report.txt
+          echo ""
+          echo "=== Victim report ==="
+          cat reports/github-hosted-victim-report/victim-report.txt
+          echo ""
+          echo "=== Analysis ==="
+          attacker_host="$(sed -n 's/^hostname=//p' reports/github-hosted-attacker-report/attacker-report.txt)"
+          victim_host="$(sed -n 's/^hostname=//p' reports/github-hosted-victim-report/victim-report.txt)"
+          attacker_mnt="$(sed -n 's/^mount_ns=//p' reports/github-hosted-attacker-report/attacker-report.txt)"
+          victim_mnt="$(sed -n 's/^mount_ns=//p' reports/github-hosted-victim-report/victim-report.txt)"
+          victim_failed="$(sed -n 's/^victim_failed=//p' reports/github-hosted-victim-report/victim-report.txt)"
+
+          echo "attacker_host=$attacker_host"
+          echo "victim_host=$victim_host"
+          echo "attacker_mount_ns=$attacker_mnt"
+          echo "victim_mount_ns=$victim_mnt"
+          echo "victim_failed=$victim_failed"
+
+          if [[ "$victim_failed" == "0" ]]; then
+            echo "result=No GitHub-hosted cross-job impact observed"
+          else
+            echo "result=Victim job observed /proc failure"
+            exit 1
+          fi
