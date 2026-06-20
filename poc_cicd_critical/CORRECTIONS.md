@@ -78,6 +78,7 @@
 - `instrumented_fusermount3.c` is a **simulation**, not actual exploitation
 - Added `safe_umount_proc_namespace.c` to prove actual `umount2("/proc")` only inside a private mount namespace
 - Added `safe_namespace_impact_demo.sh` for contained cross-process impact
+- Added `real_fusermount3_chain_demo.sh` to attempt the real fusermount3 path and print race timing
 - Added `synthetic_token_exposure_demo.sh` for fake-token exposure modeling
 
 ## Accurate Summary
@@ -86,8 +87,9 @@ This PoC demonstrates:
 
 1. **Vulnerability exists**: Vulnerable `fusermount3` is present on GitHub-hosted runners (Ubuntu 24.04 has libfuse 3.14.0)
 2. **Race mechanics work**: Symlink swap + path resolution demonstrated in simulation
-3. **Contained impact proof**: Actual `/proc` unmount and victim failures are shown only in a private mount namespace
-4. **Synthetic token model**: Fake-token exposure is shown without reading real credentials
+3. **Real-chain attempt**: The workflow invokes real `fusermount3` in a private mount namespace and reports whether the full chain succeeds
+4. **Contained impact proof**: Actual `/proc` unmount and victim failures are shown only in a private mount namespace
+5. **Synthetic token model**: Fake-token exposure is shown without reading real credentials
 
 **Impact reality**:
 - GitHub-hosted runners: **DoS of own job only** (isolated VM) = CVSS 6.5

@@ -24,6 +24,11 @@ jobs:
           mkdir -p /tmp/x/proc
           ./instrumented_fusermount3 /tmp/x/proc
 
+      - name: Attempt end-to-end real fusermount3 chain
+        run: |
+          cd poc_cicd_critical
+          bash real_fusermount3_chain_demo.sh
+
       - name: Safe umount2(/proc) and victim impact proof
         run: |
           cd poc_cicd_critical
@@ -54,9 +59,10 @@ jobs:
           echo ""
           echo "=== Claims demonstrated ==="
           echo "1. Race/path-resolution mechanics: instrumented simulation"
-          echo "2. Real unmount action: guarded private namespace /proc proof or tmpfs fallback"
-          echo "3. Cross-process impact: victim loops fail inside private namespace"
-          echo "4. Token exposure model: fake token only, no real secrets read"
+          echo "2. End-to-end real fusermount3 chain attempted in a private mount namespace"
+          echo "3. Real unmount action: guarded private namespace /proc proof or tmpfs fallback"
+          echo "4. Cross-process impact: victim loops fail inside private namespace"
+          echo "5. Token exposure model: fake token only, no real secrets read"
 
   github-hosted-attacker:
     runs-on: ubuntu-latest
