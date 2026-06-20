@@ -313,6 +313,7 @@ static int attempt_chain(int attempt)
 	int status = 0;
 	int saw_mount = 0;
 	int swapped = 0;
+	int proc_gone = 0;
 	long long detect_us = -1, swap_us = -1, exit_us = -1;
 
 	if (setup_paths(root, sizeof(root), base, sizeof(base), target,
@@ -427,7 +428,18 @@ static int attempt_chain(int attempt)
 
 	close(peer_fd);
 
-	if (saw_mount && swapped && proc_is_gone()) {
+	proc_gone = proc_is_gone();
+	if (saw_mount && swapped) {
+		int fuse_at_moved = mount_visible(moved);
+		int fuse_at_swapped = mount_visible(target);
+
+		printf("[attempt %d] post-failure fuse_visible_at_original_tree=%d\n",
+		       attempt, fuse_at_moved);
+		printf("[attempt %d] post-failure fuse_visible_at_swapped_path=%d\n",
+		       attempt, fuse_at_swapped);
+	}
+
+	if (saw_mount && swapped && proc_gone) {
 		printf("[attempt %d] SUCCESS: /proc is inaccessible after real fusermount3 cleanup\n",
 		       attempt);
 		return 0;

@@ -8,7 +8,7 @@ This demonstrates a vulnerability in `libfuse` `fusermount3` that exists on CI/C
 
 ## What This Actually Demonstrates
 
-- Vulnerable `fusermount3` is present on GitHub-hosted runners
+- FUSE preconditions are present on GitHub-hosted runners (`/dev/fuse`, setuid `fusermount3`)
 - Symlink race mechanics (rename + symlink swap)
 - Path resolution changes that would target `/proc`
 - Optional end-to-end probe that invokes real `/usr/bin/fusermount3`, passes a controlled `_FUSE_COMMFD` socketpair, blocks the real `send_fd()` after the real FUSE mount, swaps the path, lets `send_fd()` fail, and checks whether `/proc` is detached
@@ -21,6 +21,7 @@ This demonstrates a vulnerability in `libfuse` `fusermount3` that exists on CI/C
 ## What This Does NOT Demonstrate
 
 - Host/global unmount of `/proc`
+- End-to-end `/proc` detach through GitHub's system `/usr/bin/fusermount3` unless the real-chain probe prints `real_fusermount3_chain=success`
 - Cross-job failure on GitHub-hosted runners
 - Real `GITHUB_TOKEN` or repository secret compromise
 - Artifact poisoning
@@ -34,7 +35,7 @@ This demonstrates a vulnerability in `libfuse` `fusermount3` that exists on CI/C
 | Self-hosted multi-tenant | `AV:N/AC:L/PR:L/UI:N/S:C/C:N/I:N/A:H` | **7.7 (High)** |
 | Local | `AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H` | **5.5 (Medium)** |
 
-**Note**: GitHub-hosted runners use isolated VMs per job - no cross-tenant impact.
+**Note**: GitHub-hosted runners use isolated VMs per job; no cross-tenant impact was observed. The GitHub-hosted score is a hypothetical availability score for a proven single-job exploit, not a CVSS 10 result.
 
 ## Vulnerability Summary
 

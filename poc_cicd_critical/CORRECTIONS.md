@@ -19,15 +19,17 @@
 ### 2. PoC Uses Contained Destructive Effects
 
 **What the PoC actually does**:
-- ✓ Verifies vulnerable preconditions exist (`/dev/fuse`, setuid `fusermount3`)
+- ✓ Verifies FUSE preconditions exist (`/dev/fuse`, setuid `fusermount3`)
 - ✓ Demonstrates the symlink race mechanics (rename + symlink)
 - ✓ Shows path resolution would target `/proc`
+- ✓ Invokes real `/usr/bin/fusermount3`, forces a real `send_fd()` timeout after a real FUSE mount, and reports whether `/proc` is detached
 - ✓ Executes `umount2("/proc", MNT_DETACH)` only after entering a private mount namespace
 - ✓ Shows synthetic victim processes failing after `/proc` is unmounted in that namespace
 - ✓ Shows fake-token exposure across same-UID processes using `FAKE_GITHUB_TOKEN`
 
 **What it does NOT do**:
 - ✗ Unmount host/global `/proc`
+- ✗ Prove end-to-end `/proc` detach through GitHub's system `/usr/bin/fusermount3` unless the real-chain probe prints `real_fusermount3_chain=success`
 - ✗ Show cross-job failure on GitHub-hosted runners
 - ✗ Demonstrate real token/secret compromise
 - ✗ Show artifact poisoning
@@ -85,14 +87,14 @@
 
 This PoC demonstrates:
 
-1. **Vulnerability exists**: Vulnerable `fusermount3` is present on GitHub-hosted runners (Ubuntu 24.04 has libfuse 3.14.0)
+1. **Preconditions exist**: GitHub-hosted runners expose `/dev/fuse` and a setuid `fusermount3` (Ubuntu 24.04 reports libfuse 3.14.0)
 2. **Race mechanics work**: Symlink swap + path resolution demonstrated in simulation
-3. **Real-chain attempt**: The workflow invokes real `fusermount3` in a private mount namespace and reports whether the full chain succeeds
+3. **Real-chain attempt**: The workflow invokes real `fusermount3` in a private mount namespace, forces real `send_fd()` failure, and reports whether the full chain succeeds
 4. **Contained impact proof**: Actual `/proc` unmount and victim failures are shown only in a private mount namespace
 5. **Synthetic token model**: Fake-token exposure is shown without reading real credentials
 
 **Impact reality**:
-- GitHub-hosted runners: **DoS of own job only** (isolated VM) = CVSS 6.5
+- GitHub-hosted runners: **DoS of own job only if end-to-end exploit succeeds** (isolated VM) = at most CVSS 6.5 for the demonstrated availability class
 - Self-hosted runners: **Potential CVSS 7.7** if poorly configured (multi-tenant)
 - Local systems: **Medium severity** local DoS = CVSS 5.5
 

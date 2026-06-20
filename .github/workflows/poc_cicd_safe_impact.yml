@@ -25,6 +25,7 @@ jobs:
           ./instrumented_fusermount3 /tmp/x/proc
 
       - name: Attempt end-to-end real fusermount3 chain
+        continue-on-error: true
         run: |
           cd poc_cicd_critical
           bash real_fusermount3_chain_demo.sh
