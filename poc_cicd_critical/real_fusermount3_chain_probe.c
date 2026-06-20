@@ -33,6 +33,7 @@
 #endif
 
 #define MAX_ATTEMPTS 30
+#define CHILD_EXIT_TIMEOUT_MS 5000
 
 static long long usec_since(const struct timespec *start)
 {
@@ -182,6 +183,31 @@ static int proc_is_gone(void)
 	return stat("/proc/self/status", &st) != 0;
 }
 
+static int wait_child_timeout(pid_t child, int *status, int timeout_ms)
+{
+	int elapsed_ms = 0;
+
+	while (elapsed_ms < timeout_ms) {
+		pid_t res = waitpid(child, status, WNOHANG);
+
+		if (res == child)
+			return 0;
+		if (res < 0)
+			return -1;
+
+		usleep(10000);
+		elapsed_ms += 10;
+	}
+
+	kill(child, SIGTERM);
+	usleep(100000);
+	if (waitpid(child, status, WNOHANG) != child) {
+		kill(child, SIGKILL);
+		waitpid(child, status, 0);
+	}
+	return 1;
+}
+
 static int attempt_chain(int attempt)
 {
 	char root[PATH_MAX], base[PATH_MAX], target[PATH_MAX], moved[PATH_MAX];
@@ -246,9 +272,17 @@ static int attempt_chain(int attempt)
 		}
 	} else {
 		printf("[attempt %d] no mountinfo event before timeout\n", attempt);
+		kill(child, SIGTERM);
+		wait_child_timeout(child, &status, 1000);
+		close(comm_fd);
+		close(ino_fd);
+		cleanup_paths(root, base, target, moved);
+		return 1;
 	}
 
-	waitpid(child, &status, 0);
+	if (wait_child_timeout(child, &status, CHILD_EXIT_TIMEOUT_MS) != 0)
+		printf("[attempt %d] fusermount3 did not exit before timeout; killed child\n",
+		       attempt);
 	exit_us = usec_since(&start);
 	printf("[attempt %d] fusermount3 exited after %lld us with status=%d\n",
 	       attempt, exit_us, status);
