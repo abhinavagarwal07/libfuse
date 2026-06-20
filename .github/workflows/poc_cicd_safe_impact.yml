@@ -1,0 +1,59 @@
+name: PoC CI/CD Safe Impact Evidence
+
+on:
+  push:
+    branches:
+      - poc-cicd-safe-gh-run
+  workflow_dispatch:
+
+jobs:
+  safe-impact-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile instrumented race demo
+        run: |
+          cd poc_cicd_critical
+          gcc -Wall -Wextra -O2 -o instrumented_fusermount3 instrumented_fusermount3.c
+
+      - name: Demonstrate race mechanics
+        run: |
+          cd poc_cicd_critical
+          rm -rf /tmp/x /tmp/x_race_moved 2>/dev/null || true
+          mkdir -p /tmp/x/proc
+          ./instrumented_fusermount3 /tmp/x/proc
+
+      - name: Safe umount2(/proc) and victim impact proof
+        run: |
+          cd poc_cicd_critical
+          bash safe_namespace_impact_demo.sh
+
+      - name: Synthetic token exposure model
+        run: |
+          cd poc_cicd_critical
+          bash synthetic_token_exposure_demo.sh
+
+      - name: Preconditions and summary
+        run: |
+          echo "=== Environment ==="
+          uname -a
+          echo ""
+          echo "=== FUSE preconditions ==="
+          if [ -c /dev/fuse ]; then
+            ls -la /dev/fuse
+          else
+            echo "/dev/fuse is not present"
+          fi
+          if command -v fusermount3 >/dev/null 2>&1; then
+            ls -la "$(command -v fusermount3)"
+            fusermount3 --version || true
+          else
+            echo "fusermount3 is not installed"
+          fi
+          echo ""
+          echo "=== Claims demonstrated ==="
+          echo "1. Race/path-resolution mechanics: instrumented simulation"
+          echo "2. Real unmount action: guarded private namespace /proc proof or tmpfs fallback"
+          echo "3. Cross-process impact: victim loops fail inside private namespace"
+          echo "4. Token exposure model: fake token only, no real secrets read"
